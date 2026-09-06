@@ -66,6 +66,7 @@
 
   function resetProgress() {
     STATE = defaultState();
+    examSession = null;
     try {
       localStorage.removeItem(STORAGE_KEY);
       localStorage.removeItem(LEGACY_STORAGE_KEY);
@@ -135,6 +136,68 @@
     return `<svg class="icon ${cls || ''}" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${ICONS[name] || ''}</svg>`;
   }
 
+  /* ===================== ОБЩИЙ APP-MODAL ===================== */
+
+  let modalSequence = 0;
+  function openModal(options) {
+    const opts = Object.assign({
+      title: '', body: '', confirmText: 'Продолжить', cancelText: 'Отмена',
+      destructive: false, showCancel: true,
+    }, options || {});
+    const trigger = document.activeElement;
+    const titleId = `app-modal-title-${++modalSequence}`;
+    const backdrop = document.createElement('div');
+    backdrop.className = 'app-modal-backdrop';
+    backdrop.innerHTML = `
+      <section class="app-modal" role="dialog" aria-modal="true" aria-labelledby="${titleId}">
+        <div class="modal-brand"><img src="assets/icon-192.png" alt="" /></div>
+        <h2 id="${titleId}">${escapeHtml(opts.title)}</h2>
+        <div class="modal-body">${opts.body}</div>
+        <div class="modal-actions">
+          ${opts.showCancel ? `<button type="button" class="btn btn-ghost" data-modal-cancel>${escapeHtml(opts.cancelText)}</button>` : ''}
+          <button type="button" class="btn ${opts.destructive ? 'btn-danger' : 'btn-primary'}" data-modal-confirm>${escapeHtml(opts.confirmText)}</button>
+        </div>
+      </section>`;
+    document.body.appendChild(backdrop);
+    document.body.classList.add('modal-open');
+
+    return new Promise(resolve => {
+      let closed = false;
+      const focusables = () => $all('button:not(:disabled), a[href], input:not(:disabled), [tabindex]:not([tabindex="-1"])', backdrop);
+      function close(result) {
+        if (closed) return;
+        closed = true;
+        document.removeEventListener('keydown', onKeydown, true);
+        backdrop.remove();
+        document.body.classList.remove('modal-open');
+        if (trigger && document.contains(trigger) && typeof trigger.focus === 'function') trigger.focus();
+        resolve(result);
+      }
+      function onKeydown(event) {
+        if (event.key === 'Escape') { event.preventDefault(); close(false); return; }
+        if (event.key !== 'Tab') return;
+        const items = focusables();
+        if (!items.length) { event.preventDefault(); return; }
+        const first = items[0], last = items[items.length - 1];
+        if (event.shiftKey && document.activeElement === first) { event.preventDefault(); last.focus(); }
+        else if (!event.shiftKey && document.activeElement === last) { event.preventDefault(); first.focus(); }
+      }
+      backdrop.querySelector('[data-modal-confirm]').addEventListener('click', () => close(true));
+      const cancel = backdrop.querySelector('[data-modal-cancel]');
+      if (cancel) cancel.addEventListener('click', () => close(false));
+      backdrop.addEventListener('click', event => { if (event.target === backdrop) close(false); });
+      document.addEventListener('keydown', onKeydown, true);
+      requestAnimationFrame(() => (cancel || backdrop.querySelector('[data-modal-confirm]')).focus());
+    });
+  }
+
+  function focusQuestionHeading(id) {
+    requestAnimationFrame(() => {
+      const heading = document.getElementById(id);
+      if (heading) heading.focus({ preventScroll: true });
+    });
+  }
+
   const BLOCK_TYPE_LABELS = {
     know: 'Что нужно знать', process: 'Основной процесс', algorithm: 'Алгоритм', branch: 'Развилка',
     important: 'Важно', forbidden: 'Нельзя', exception: 'Исключение', mistake: 'Частая ошибка',
@@ -200,9 +263,12 @@
   }
 
   function renderNavActive(section) {
+    const activeSection = section === 'module' ? 'modules' : section === 'review' ? 'exam' : section;
     $all('.nav-link').forEach(a => {
       const s = a.getAttribute('data-section');
-      a.classList.toggle('active', s === section || (section === undefined && s === 'dashboard'));
+      const active = s === activeSection || (activeSection === undefined && s === 'dashboard');
+      a.classList.toggle('active', active);
+      if (active) a.setAttribute('aria-current', 'page'); else a.removeAttribute('aria-current');
     });
   }
 
@@ -315,8 +381,8 @@
       <a class="skip-link" href="#app-main">Перейти к содержимому</a>
       <header class="topbar">
         <div class="topbar-inner">
-          <a href="#/dashboard" class="brand" aria-label="На главную">
-            <span class="brand-mark">ПВЗ</span><span class="brand-text">Академия ПВЗ</span>
+          <a href="#/dashboard" class="brand" aria-label="WB Академия — на главную">
+            <img class="brand-mark" src="assets/icon-192.png" alt="" /><span class="brand-text">WB Академия</span>
           </a>
           <form class="search-form" id="global-search-form" role="search">
             <label class="sr-only" for="global-search-input">Поиск по материалу</label>
@@ -326,11 +392,11 @@
           <nav class="topnav" aria-label="Основная навигация">
             <a class="nav-link" data-section="dashboard" href="#/dashboard">${icon('home')}<span>Главная</span></a>
             <a class="nav-link" data-section="modules" href="#/modules">${icon('book')}<span>Темы</span></a>
-            <a class="nav-link" data-section="numbers" href="#/numbers">${icon('hash')}<span>Числа и сроки</span></a>
-            <a class="nav-link" data-section="defects" href="#/defects">${icon('alert')}<span>Брак</span></a>
             <a class="nav-link" data-section="exam" href="#/exam">${icon('exam')}<span>Экзамен</span></a>
-            <a class="nav-link" data-section="mistakes" href="#/mistakes">${icon('warn')}<span>Ошибки</span></a>
-            <a class="nav-link" data-section="bookmarks" href="#/bookmarks">${icon('bookmark')}<span>Закладки</span></a>
+            <a class="nav-link" data-section="defects" href="#/defects">${icon('alert')}<span>Брак</span></a>
+            <a class="nav-link" data-section="numbers" href="#/numbers">${icon('hash')}<span>Числа</span></a>
+            <a class="nav-link utility-link" data-section="mistakes" href="#/mistakes" aria-label="Работа над ошибками">${icon('warn')}</a>
+            <a class="nav-link utility-link" data-section="bookmarks" href="#/bookmarks" aria-label="Закладки">${icon('bookmark')}</a>
           </nav>
         </div>
       </header>
@@ -348,6 +414,13 @@
       const q = $('#global-search-input').value.trim();
       if (q) navigate('#/search?q=' + encodeURIComponent(q));
     });
+    $('.bottomnav').addEventListener('click', event => {
+      const link = event.target.closest('.nav-link');
+      if (!link || !link.classList.contains('active')) return;
+      event.preventDefault();
+      const reduced = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+      window.scrollTo({ top: 0, behavior: reduced ? 'auto' : 'smooth' });
+    });
   }
 
   /* ===================== ДАШБОРД ===================== */
@@ -364,13 +437,26 @@
 
     main.innerHTML = `
       <div class="page page-dashboard">
-        <div class="page-head">
-          <h1>Ваш прогресс</h1>
-          <p class="muted">Учебный тренажёр сотрудника ПВЗ — 15 тем, тренировочные тесты и итоговый экзамен.</p>
+        <section class="academy-hero">
+          <div class="hero-copy">
+            <span class="eyebrow">WB Академия</span>
+            <h1>Знания для уверенной работы в ПВЗ</h1>
+            <p>15 практических тем, тренировки и итоговая проверка — весь прогресс сохраняется на устройстве.</p>
+            <div class="hero-actions">
+              ${last ? `<a class="btn btn-light btn-lg" href="#/module/${last.id}">${icon('arrowRight')}Продолжить обучение</a>` : `<a class="btn btn-light btn-lg" href="#/modules">${icon('book')}Открыть темы</a>`}
+              <a class="btn btn-glass" href="#/exam">${icon('exam')}Экзамен</a>
+            </div>
+          </div>
+          <img class="hero-icon" src="assets/icon-512.png" alt="" />
+        </section>
+
+        <div class="page-head dashboard-heading">
+          <div><span class="eyebrow dark">Ваш прогресс</span><h2>Продолжайте в своём темпе</h2></div>
+          <a class="text-link" href="#/modules">Все темы ${icon('arrowRight')}</a>
         </div>
 
-        <div class="stat-grid">
-          <div class="stat-card">
+        <div class="stat-grid dashboard-stats">
+          <div class="stat-card stat-primary">
             <div class="stat-value">${avg}%</div>
             <div class="stat-label">Материал изучен</div>
             <div class="progress-track"><div class="progress-fill" style="width:${avg}%"></div></div>
@@ -383,22 +469,15 @@
             <div class="stat-value">${avgTest === null ? '—' : avgTest + '%'}</div>
             <div class="stat-label">Средний результат тестов</div>
           </div>
-          <div class="stat-card">
-            <div class="stat-value">${mistakes}</div>
-            <div class="stat-label">Вопросов в работе над ошибками</div>
-          </div>
-          <div class="stat-card">
+          <div class="stat-card stat-exam">
             <div class="stat-value">${bestExam === null ? '—' : bestExam + '%'}</div>
             <div class="stat-label">Лучший результат экзамена</div>
-          </div>
-          <div class="stat-card">
-            <div class="stat-value">${examAttempts}</div>
-            <div class="stat-label">Попыток экзамена</div>
+            <div class="stat-meta">${examAttempts ? `Попыток: ${examAttempts}` : 'Попыток пока нет'}</div>
           </div>
         </div>
 
         <div class="quick-actions">
-          <a class="qa-btn" href="#/module/${last ? last.id : 1}">${icon('arrowRight')}Продолжить обучение</a>
+          ${last ? `<a class="qa-btn" href="#/module/${last.id}">${icon('arrowRight')}Продолжить обучение</a>` : ''}
           <a class="qa-btn" href="#/mistakes">${icon('warn')}Повторить ошибки${mistakes ? ` <span class="badge">${mistakes}</span>` : ''}</a>
           <a class="qa-btn" href="#/numbers">${icon('hash')}Числа и сроки</a>
           <a class="qa-btn" href="#/defects">${icon('alert')}Справочник брака</a>
@@ -434,8 +513,13 @@
       </div>
     `;
     const resetBtn = $('#reset-progress-btn');
-    if (resetBtn) resetBtn.addEventListener('click', () => {
-      if (confirm('Сбросить весь прогресс: пройденный материал, результаты тестов, экзамены, ошибки и закладки? Это действие необратимо.')) {
+    if (resetBtn) resetBtn.addEventListener('click', async () => {
+      const confirmed = await openModal({
+        title: 'Сбросить весь прогресс?',
+        body: '<p>Будут удалены прогресс материалов, результаты тестов, экзамены, ошибки и закладки.</p><p><strong>Это действие нельзя отменить.</strong></p>',
+        confirmText: 'Сбросить', destructive: true,
+      });
+      if (confirmed) {
         resetProgress();
         navigate('#/dashboard');
         renderDashboard($('#app-main'));
@@ -453,12 +537,15 @@
       <a class="module-card" href="#/module/${m.id}">
         <div class="module-card-top">
           <span class="module-num">${m.id}</span>
-          <span class="material-chip ${progressStatus === PROGRESS.CONTENT_COMPLETED ? 'done' : ''}">Материал: ${progressStatus === PROGRESS.CONTENT_COMPLETED ? 'изучен' : progressStatus === PROGRESS.IN_PROGRESS ? 'в процессе' : 'не начат'}</span>
+          <span class="module-chevron" aria-hidden="true">${icon('chevron')}</span>
         </div>
         <h3>${escapeHtml(m.title)}</h3>
         <p class="muted small">${escapeHtml(m.short)}</p>
         <div class="progress-track thin"><div class="progress-fill" style="width:${progress}%"></div></div>
-        <div class="module-metrics"><span>Материал: ${progress}%</span><span>Тест: ${test ? test.percent + '%' : 'не пройден'}</span></div>
+        <div class="module-metrics">
+          <span><small>Материал</small><strong>${progressStatus === PROGRESS.CONTENT_COMPLETED ? 'изучен' : progressStatus === PROGRESS.IN_PROGRESS ? 'в процессе' : 'не начат'}</strong></span>
+          <span><small>Тест</small><strong>${test ? test.percent + '%' : 'не пройден'}</strong></span>
+        </div>
       </a>`;
   }
 
@@ -596,11 +683,15 @@
     }
   }
 
-  function quickChecksForModule(moduleId, blocks) {
+  function quickCheckCandidatesForModule(moduleId, blocks) {
     const blockIds = new Set(blocks.map(b => b.id));
-    const eligible = questionsForModule(moduleId).filter(q =>
+    return questionsForModule(moduleId).filter(q =>
       isScoredEligible(q) && q.difficulty === 'easy' &&
       (q.type === 'single' || q.type === 'boolean') && blockIds.has(q.relatedBlockId));
+  }
+
+  function quickChecksForModule(moduleId, blocks) {
+    const eligible = quickCheckCandidatesForModule(moduleId, blocks);
     try {
       const all = JSON.parse(sessionStorage.getItem(QUICK_CHECK_SESSION_KEY) || '{}');
       const saved = Array.isArray(all[moduleId]) ? all[moduleId].map(id => eligible.find(q => q.id === id)).filter(Boolean) : [];
@@ -631,13 +722,17 @@
     const wrap = document.createElement('div');
     wrap.className = 'quick-check';
     wrap.dataset.mode = 'QUICK_CHECK';
+    wrap.dataset.relatedBlockId = q.relatedBlockId;
     const state = { submitted: false, answer: null };
     const opts = q.options.map((opt, i) => `<button class="qc-option" type="button" role="radio" aria-checked="false" data-i="${i}">${escapeHtml(opt)}</button>`).join('');
     wrap.innerHTML = `
-      <div class="quick-check-badge">${icon('info')}Быстрая проверка</div>
+      <div class="quick-check-head">
+        <div class="quick-check-badge">${icon('info')}Быстрая проверка</div>
+        <span class="type-chip qc-type">${TYPE_LABELS[q.type]}</span>
+      </div>
       <p class="qc-prompt">${escapeHtml(q.prompt)}</p>
       <div class="qc-options" role="radiogroup">${opts}</div>
-      <div class="qc-feedback" hidden></div>
+      <div class="qc-feedback" role="status" aria-live="polite" hidden></div>
     `;
     wrap.addEventListener('click', e => {
       const btn = e.target.closest('.qc-option');
@@ -849,10 +944,11 @@
     return Object.freeze({ lock });
   }
 
-  function renderExplanationBlock(q, userWasCorrect) {
+  function renderExplanationBlock(q, userWasCorrect, answer) {
     return `
-      <div class="feedback-box ${userWasCorrect ? 'good' : 'bad'}">
+      <div class="feedback-box ${userWasCorrect ? 'good' : 'bad'}" role="status" aria-live="polite">
         <div class="feedback-status">${icon(userWasCorrect ? 'check' : 'x')}${userWasCorrect ? 'Верно' : 'Неверно'}</div>
+        ${!userWasCorrect && q.type === 'sequence' ? renderAnswerReview(q, answer) : ''}
         <p>${escapeHtml(q.explanation)}</p>
         ${q.relatedBlockId ? `<a class="btn btn-ghost btn-sm" href="#/module/${q.moduleId}?block=${q.relatedBlockId}">Открыть материал</a>` : ''}
       </div>`;
@@ -879,7 +975,7 @@
           <div class="progress-track"><div class="progress-fill" style="width:${(i / questions.length) * 100}%"></div></div>
           <div class="quiz-card">
             <span class="type-chip">${TYPE_LABELS[qi.type]}</span>
-            <h2 class="quiz-prompt">${escapeHtml(qi.prompt)}</h2>
+            <h2 class="quiz-prompt" id="quiz-question-heading" tabindex="-1">${escapeHtml(qi.prompt)}</h2>
             <div id="quiz-interaction"></div>
             <div id="quiz-feedback"></div>
             <div class="quiz-actions">
@@ -912,7 +1008,7 @@
         if (!immediate) { goNext(); return; }
         interaction.lock();
         applyFeedbackStyles(qi, currentAnswer);
-        $('#quiz-feedback').innerHTML = renderExplanationBlock(qi, ok);
+        $('#quiz-feedback').innerHTML = renderExplanationBlock(qi, ok, answers[qi.id]);
         $('#quiz-submit').hidden = true;
         $('#quiz-submit').disabled = true;
         $('#quiz-next').hidden = false;
@@ -977,7 +1073,7 @@
         const ok = isAnswerCorrect(qi, answers[qi.id]);
         recordAnswerOutcome(qi, ok);
         $('#quiz-interaction').innerHTML = `<p class="empty-note">${icon('check')}Сценарий завершён. Ответ сохранён.</p>`;
-        if (immediate) $('#quiz-feedback').innerHTML = renderExplanationBlock(qi, ok);
+        if (immediate) $('#quiz-feedback').innerHTML = renderExplanationBlock(qi, ok, answers[qi.id]);
         $('#quiz-next').hidden = false;
       }
       renderStep();
@@ -988,7 +1084,7 @@
     }
 
     function goNext() {
-      if (i < questions.length - 1) { i++; renderQ(); }
+      if (i < questions.length - 1) { i++; renderQ(); focusQuestionHeading('quiz-question-heading'); }
       else finish();
     }
 
@@ -1024,7 +1120,7 @@
           </div>
         </section>` : res.unanswered === 0 && res.correct === res.total ? `<p class="empty-note">${icon('check')} Ошибок нет — отличный результат!</p>` : ''}
         <div class="quiz-actions">
-          <a class="btn btn-ghost" href="${res.opts.backHash}">${icon('chevron', 'rotate-180')}Вернуться</a>
+          <a class="btn btn-ghost" id="result-back" href="${res.opts.backHash}">${icon('chevron', 'rotate-180')}Вернуться</a>
           <button class="btn btn-primary" id="retry-btn">Пройти ещё раз</button>
         </div>
       </div>`;
@@ -1050,6 +1146,11 @@
   function renderAnswerReview(q, answer) {
     const yourLabel = q.type === 'sequence' ? 'Ваш порядок' : q.type === 'branching' ? 'Ваши ответы по шагам' : 'Ваш ответ';
     const correctLabel = q.type === 'sequence' ? 'Правильный порядок' : q.type === 'branching' ? 'Правильные ответы по шагам' : 'Правильный ответ';
+    if (q.type === 'sequence') {
+      const chosen = Array.isArray(answer) ? answer.map(slot => q._options[slot]) : [];
+      const ordered = items => `<ol class="answer-order">${items.map(item => `<li>${escapeHtml(item)}</li>`).join('')}</ol>`;
+      return `<div class="sequence-review"><h3>${yourLabel}</h3>${ordered(chosen)}<h3>${correctLabel}</h3>${ordered(q.options)}</div>`;
+    }
     return `<dl class="answer-review"><dt>${yourLabel}</dt><dd>${escapeHtml(answerTexts(q, answer, false))}</dd><dt>${correctLabel}</dt><dd>${escapeHtml(answerTexts(q, answer, true))}</dd></dl>`;
   }
 
@@ -1098,7 +1199,7 @@
       </div>`;
     $('#start-mistakes').addEventListener('click', () => {
       const run = () => startPracticeQuiz(main, shuffled(qs), {
-        mode: QUIZ_MODES.ERROR_REVIEW, backHash: '#/mistakes', onRetry: run, onComplete: () => {},
+        mode: QUIZ_MODES.ERROR_REVIEW, backHash: `#/module/${qs[0].moduleId}`, onRetry: run, onComplete: () => {},
       });
       run();
     });
@@ -1242,11 +1343,31 @@
   }
 
   function renderExamIntro(main) {
+    if (!examSession || examSession.lastResult) examSession = loadExamSessionFromStorage();
+    const activeExam = examSession && !examSession.lastResult && isValidExamQuestionSet(examSession.questions);
     const attempts = STATE.examAttempts;
     const best = bestExamPercent();
+    const activeCompleted = activeExam ? examSession.questions.filter(q => isAnswerComplete(q, examSession.answers[q.id])).length : 0;
     main.innerHTML = `
       <div class="page page-exam-intro">
-        <div class="page-head"><h1>Итоговый экзамен</h1><p class="muted">Комплексная проверка по всем 15 темам курса.</p></div>
+        <div class="exam-intro-hero">
+          <span class="eyebrow">Финальная проверка</span>
+          <h1>Итоговый экзамен</h1>
+          <p>60 вопросов по всем 15 темам. Ответы сохраняются в этой вкладке.</p>
+        </div>
+        ${activeExam ? `
+        <section class="exam-resume-card" aria-labelledby="exam-resume-title">
+          <div>
+            <span class="status-pill">Экзамен в процессе</span>
+            <h2 id="exam-resume-title">Вопрос ${examSession.current + 1} из ${examSession.questions.length}</h2>
+            <p class="muted">Отвечено: ${activeCompleted} из ${examSession.questions.length}. Порядок вопросов и ответы сохранены.</p>
+            <div class="progress-track"><div class="progress-fill" style="width:${pct(activeCompleted, examSession.questions.length)}%"></div></div>
+          </div>
+          <div class="resume-actions">
+            <button class="btn btn-primary btn-lg" id="resume-exam-btn">${icon('arrowRight')}Продолжить экзамен</button>
+            <button class="btn btn-ghost" id="start-exam-btn">Начать заново</button>
+          </div>
+        </section>` : ''}
         <div class="exam-info-grid">
           <div class="info-card">${icon('exam')}<div><strong>${Math.min(EXAM_SIZE_DEFAULT, PVZ_QUESTIONS.length)} вопросов</strong><span>случайно из банка ${PVZ_QUESTIONS.length}, с гарантированным покрытием всех 15 тем</span></div></div>
           <div class="info-card">${icon('star')}<div><strong>${EXAM_PASS_PERCENT}% — проходной балл этой обучалки</strong><span>это внутренний ориентир тренажёра, а не официальное правило Wildberries</span></div></div>
@@ -1268,10 +1389,20 @@
         </section>` : ''}
         <div class="quiz-actions">
           <a class="btn btn-ghost" href="#/review">${icon('book')}Повторение перед экзаменом</a>
-          <button class="btn btn-primary btn-lg" id="start-exam-btn">${icon('exam')}Начать экзамен</button>
+          ${activeExam ? '' : `<button class="btn btn-primary btn-lg" id="start-exam-btn">${icon('exam')}Начать экзамен</button>`}
         </div>
       </div>`;
-    $('#start-exam-btn').addEventListener('click', () => {
+    const resumeBtn = $('#resume-exam-btn');
+    if (resumeBtn) resumeBtn.addEventListener('click', () => navigate('#/exam/run'));
+    $('#start-exam-btn').addEventListener('click', async () => {
+      if (activeExam) {
+        const confirmed = await openModal({
+          title: 'Начать экзамен заново?',
+          body: '<p>Текущая попытка и сохранённые в ней ответы будут удалены.</p><p><strong>Это действие нельзя отменить.</strong></p>',
+          confirmText: 'Начать заново', destructive: true,
+        });
+        if (!confirmed) return;
+      }
       examSession = { questions: buildExam(EXAM_SIZE_DEFAULT), answers: {}, flagged: new Set(), current: 0 };
       persistExamSession();
       navigate('#/exam/run');
@@ -1303,7 +1434,7 @@
               <span class="type-chip">${TYPE_LABELS[qi.type]}</span>
               <button class="icon-btn flag-toggle ${examSession.flagged.has(qi.id) ? 'active' : ''}" id="flag-btn" aria-pressed="${examSession.flagged.has(qi.id)}">${icon('flag')}<span class="sr-only">Вернуться позже</span></button>
             </div>
-            <h2 class="quiz-prompt">${escapeHtml(qi.prompt)}</h2>
+            <h2 class="quiz-prompt" id="exam-question-heading" tabindex="-1">${escapeHtml(qi.prompt)}</h2>
             <div id="quiz-interaction"></div>
           </div>
           <div class="exam-bottom-nav">
@@ -1338,11 +1469,11 @@
         persistExamSession();
       });
       $('#exam-nav-toggle').addEventListener('click', () => { const nav = $('#exam-navigator'); nav.hidden = !nav.hidden; });
-      $('#exam-prev') && $('#exam-prev').addEventListener('click', () => { current--; examSession.current = current; persistExamSession(); renderCurrent(); });
+      $('#exam-prev') && $('#exam-prev').addEventListener('click', () => { current--; examSession.current = current; persistExamSession(); renderCurrent(); focusQuestionHeading('exam-question-heading'); });
       const nextBtn = $('#exam-next'); if (nextBtn) nextBtn.addEventListener('click', () => {
         confirmCurrentMulti(qi);
         if (!isAnswerComplete(qi, examSession.answers[qi.id])) return;
-        current++; examSession.current = current; persistExamSession(); renderCurrent();
+        current++; examSession.current = current; persistExamSession(); renderCurrent(); focusQuestionHeading('exam-question-heading');
       });
       const submitBtn = $('#exam-submit'); if (submitBtn) submitBtn.addEventListener('click', () => { confirmCurrentMulti(qi); tryFinish(); });
     }
@@ -1442,7 +1573,7 @@
         const target = Number(btn.getAttribute('data-i'));
         const currentQuestion = examSession.questions[current];
         if (target > current && !isAnswerComplete(currentQuestion, examSession.answers[currentQuestion.id])) return;
-        current = target; examSession.current = current; persistExamSession(); renderCurrent();
+        current = target; examSession.current = current; persistExamSession(); renderCurrent(); focusQuestionHeading('exam-question-heading');
       }));
     }
     function updateNavigatorDot(i) {
@@ -1455,12 +1586,16 @@
       btn.classList.toggle('flagged', examSession.flagged.has(q.id));
     }
 
-    function tryFinish() {
+    async function tryFinish() {
       const total = examSession.questions.length;
       const answeredCount = examSession.questions.filter(q => isAnswerComplete(q, examSession.answers[q.id])).length;
       if (answeredCount < total) {
         const missing = total - answeredCount;
-        alert(`Чтобы завершить экзамен, ответьте ещё на ${missing} вопрос(ов).`);
+        await openModal({
+          title: 'Экзамен ещё не завершён',
+          body: `<p>Чтобы завершить экзамен, ответьте ещё на <strong>${missing}</strong> вопрос(ов).</p>`,
+          confirmText: 'Понятно', showCancel: false,
+        });
         return;
       }
       finishExam();
@@ -1572,6 +1707,7 @@
         </section>` : `<p class="empty-note">${icon('check')} Ни одной ошибки — превосходно!</p>`}
 
         <div class="quiz-actions">
+          <a class="btn btn-ghost" id="result-back" href="#/exam">${icon('chevron', 'rotate-180')}Вернуться к экзамену</a>
           <a class="btn btn-ghost" href="#/mistakes">${icon('warn')}Повторить ошибки</a>
           <button class="btn btn-primary" id="new-exam-btn">${icon('exam')}Новый экзамен</button>
         </div>
@@ -1762,6 +1898,7 @@
         <form class="search-form-inline" id="search-inline-form">
           ${icon('search')}
           <input id="search-inline-input" type="search" value="${escapeHtml(q)}" placeholder="Например: IMEI, DBS, 14 дней, пломба" />
+          <button class="search-clear" id="search-clear-btn" type="button" aria-label="Очистить поиск" ${q ? '' : 'hidden'}>${icon('x')}</button>
         </form>
         <div id="search-results"></div>
       </div>`;
@@ -1803,6 +1940,15 @@
       `;
     }
     $('#search-inline-form').addEventListener('submit', e => { e.preventDefault(); navigate('#/search?q=' + encodeURIComponent($('#search-inline-input').value)); });
+    const searchInput = $('#search-inline-input');
+    const clearButton = $('#search-clear-btn');
+    searchInput.addEventListener('input', () => { clearButton.hidden = !searchInput.value; });
+    clearButton.addEventListener('click', () => {
+      searchInput.value = '';
+      clearButton.hidden = true;
+      runSearch('');
+      searchInput.focus();
+    });
     runSearch(q);
   }
 
@@ -1843,7 +1989,7 @@
     onRouteChange();
   }
 
-  window.PVZAcademyCore = Object.freeze({ QUIZ_MODES, PROGRESS, isAnswerComplete, isAnswerCorrect, buildResult, buildExam, isScoredEligible, isValidExamQuestionSet, searchableBlockText });
+  window.PVZAcademyCore = Object.freeze({ QUIZ_MODES, PROGRESS, isAnswerComplete, isAnswerCorrect, buildResult, buildExam, isScoredEligible, isValidExamQuestionSet, quickCheckCandidatesForModule, searchableBlockText });
 
   if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', init);
   else init();
